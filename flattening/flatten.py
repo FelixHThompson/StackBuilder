@@ -1,6 +1,7 @@
 import numpy as np
 import math
 from scipy.spatial.transform import Rotation
+from scipy.optimize import minimize
 import copy
 import argparse
 
@@ -105,18 +106,18 @@ def translate_structure(structure, trans_vec):
 
     return structure
 
-def plane_rmsd(structure):
-    """
-    """
-
-    sq_residuals = 0
-    for atom in structure:
-        sq_residuals += atom[1][2] ** 2
-
-    return sq_residuals
-
 def find_centroid(structure):
-    """
+    """Find the centroid of a given structure.
+
+    Parameters
+    ----------
+    structure : list(string, np.arrray[])
+        Formatted list of atom positions
+
+    Returns
+    -------
+    np.array[]
+        Coordinates of structure's centroid
     """
 
     coords_sum = np.asarray([0.0, 0.0, 0.0])
@@ -126,69 +127,94 @@ def find_centroid(structure):
 
     return centroid
 
-parser = argparse.ArgumentParser(description='Molecular stack builder:')
+def rmsd_angle(angles, structure):
+    """Find the root mean squared displacement of a structure to a plane.
+
+    Conventionally the RMSD might be taken to the xy-plane, as such making
+      each displacement simply the z-coordinate of each position. This process
+      can be done for a general plane passing through the origin. Such a plane
+      can be defined by a unit vector orthogonal to the plane, with the vector
+      defined by the spherical angles theta and phi. At each position the
+      displacement is found from the dot-product of the orthogonal vector and
+      the vector defining the position.
+
+    Constructed in this way, this function is used to carry out a scipy
+      minimization, finding the vector (and therefore plane) for which the
+      RMSD is minimized -- i.e. the plane in which the structure is most flat.
+
+    Parameters
+    ----------
+    angles : list(float, float)
+        The spherical angles theta and phi
+    structure : list(string, np.arrray[])
+        Formatted list of atom positions
+
+    Returns
+    -------
+    float
+        RMSD of the system to a given plane
+    """
+
+    theta = angles[0]
+    phi = angles[1]
+    n_prime = np.asarray([np.sin(theta) * np.cos(phi), np.sin(theta) * np.sin(phi), np.cos(theta)])
+
+    run_rmsd = 0
+    for atom in structure:
+        run_rmsd += abs(np.dot(n_prime, atom[1])) ** 2
+
+    final_rmsd = (run_rmsd / len(structure)) ** 0.5
+
+    return final_rmsd
+
+def Rodrigues(angles, structure):
+    """Apply the Rodrigues' rotation formula to a given structure.
+
+    This formula allows the rotation of a vector by a certain angle about a
+      certain axis. Here, each vector is an atomic position, the angle the
+      angle between the z-axis and our minimising RMSD vector, and the axis is
+      the vector orthogonal to the z-axis and said RMSD vector.
+
+    Parameters
+    ----------
+    angles : list(float, float)
+        The spherical angles theta and phi
+    structure : list(string, np.arrray[])
+        Formatted list of atom positions
+
+    Returns
+    -------
+    list(string, np.array[])
+        Formatted list of atom positions, having been rotated
+    """
+    theta, phi = angles
+    n_prime = np.asarray([np.sin(theta)*np.cos(phi), np.sin(theta)*np.sin(phi), np.cos(theta)])
+    init = np.asarray([0.0, 0.0, 1.0])
+    k = np.cross(init, n_prime)
+    alpha = -1 * np.arccos(np.dot(init, n_prime))
+
+    for x in range(0, len(structure)):
+        v = structure[x][1]
+        structure[x][1] = v * np.cos(alpha) + np.cross(k, v) * np.sin(alpha) + k * (np.dot(k, v)) * (1 - np.cos(alpha))
+
+    return structure
+
+parser = argparse.ArgumentParser(description='Molecule flattener:')
 parser.add_argument("mol", default="mol.xyz",
-                    help="Monomer coordinate file [.xyz formatting]")
+                    help="Coordinate file [.xyz]")
+parser.add_argument("-f", "-flip", action='store_true', required=False,
+                    help="Flip molecule through z-axis")
 args = parser.parse_args()
 
 mol = load_xyz(args.mol)
 
 ## Add some selection for only mapping based on C's for example
-lowest = [plane_rmsd(mol), [0.0,0.0,0.0]]
-print(find_centroid(mol))
 mol = translate_structure(mol, -1 * find_centroid(mol))
 save_xyz(mol, "centred.xyz")
-print(plane_rmsd(mol))
 
+res = minimize(rmsd_angle, x0=[0,0], args=mol, method='TNC', bounds=((0, np.pi), (0, 2*np.pi)))
+mol = Rodrigues(res.x, mol)
+if args.f:
+    mol = Rodrigues([np.pi, np.pi], mol)
 
-
-carryon = True
-xlb = 0
-xub = 180
-ylb = 0
-yub = 180
-zlb = 0
-zub = 180
-step = 20
-while carryon == True:
-    x = xlb
-    while x <= xub:
-        y = ylb
-        while y <= yub:
-            z = zlb
-            #print("Currently: {}/{}/{}".format(x, y, z))
-            while z <= zub:
-                t_mol = copy.deepcopy(mol)
-                t_xyz = plane_rmsd(rotate_structure(t_mol, Rotation.from_euler('xyz', [x, y, z], degrees=True)))
-                if t_xyz < lowest[0]:
-                    lowest = [t_xyz, [x, y, z]]
-                    print("New: ")
-                    print(lowest)
-                z += step
-            y += step
-        x += step
-    step = step * 0.5
-    xlb = lowest[1][0] - 2 * step
-    xub = lowest[1][0] + 2 * step
-    ylb = lowest[1][1] - 2 * step
-    yub = lowest[1][1] + 2 * step
-    zlb = lowest[1][2] - 2 * step
-    zub = lowest[1][2] + 2 * step
-
-    print("This pass finds: ")
-    print(lowest)
-    print("New step: "+str(step))
-    print("x-bounds: "+str(xlb)+", "+str(xub))
-    print("y-bounds: "+str(ylb)+", "+str(yub))
-    print("z-bounds: "+str(zlb)+", "+str(zub))
-
-    if step <= 0.05:
-        carryon = False
-
-
-print(plane_rmsd(mol))
-
-R = Rotation.from_euler('xyz', lowest[1], degrees=True)
-mol = rotate_structure(mol, R)
-print(plane_rmsd(mol))
-save_xyz(mol, "temp.xyz")
+save_xyz(mol, "flattened.xyz")
