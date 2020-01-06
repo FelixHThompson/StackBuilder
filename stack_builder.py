@@ -159,8 +159,3 @@ if args.o == "":
 else:
     output_name = args.o
 save_xyz(stack, output_name+".xyz")
-
-# Handle range of inputs? Tbh all single line in terminal, so just write a
-#   script that interfaces with it if needs be?
-# Be great to be able to pass lists of angles for each layer.
-# Include molecule alignment?
