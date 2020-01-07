@@ -35,13 +35,13 @@ def load_xyz(file_path):
     for lines in file_contents:
     # First two lines of file are descriptive and skipped over
         if i > 1:
-            split_line = lines.split()
-            if len(split_line) > 0:
-                coords = np.asarray([float(split_line[1]), float(split_line[2]),
-                                    float(split_line[3])])
+            line_bits = lines.split()
+            if len(line_bits) > 0:
+                coords = np.asarray([float(line_bits[1]), float(line_bits[2]),
+                                    float(line_bits[3])])
 
-                if len(split_line) > 2:
-                    structure += [[split_line[0], coords, i-2]]
+                if len(line_bits) > 2:
+                    structure += [[line_bits[0], coords, i-2]]
         i += 1
 
     return structure
@@ -157,10 +157,15 @@ def rmsd_angle(angles, structure):
 
     theta = angles[0]
     phi = angles[1]
-    n_prime = np.asarray([np.sin(theta) * np.cos(phi), np.sin(theta) * np.sin(phi), np.cos(theta)])
+
+    # From our spherical angles, a plane-defining vector is formed
+    n_prime = np.asarray([np.sin(theta) * np.cos(phi),
+                          np.sin(theta) * np.sin(phi),
+                          np.cos(theta)])
 
     run_rmsd = 0
     for atom in structure:
+        # Summing the square displacements of each position to this plane
         run_rmsd += abs(np.dot(n_prime, atom[1])) ** 2
 
     final_rmsd = (run_rmsd / len(structure)) ** 0.5
@@ -187,15 +192,25 @@ def Rodrigues(angles, structure):
     list(string, np.array[])
         Formatted list of atom positions, having been rotated
     """
+
     theta, phi = angles
-    n_prime = np.asarray([np.sin(theta)*np.cos(phi), np.sin(theta)*np.sin(phi), np.cos(theta)])
+
+    # From our spherical angles, a plane-defining vector is formed
+    n_prime = np.asarray([np.sin(theta) * np.cos(phi),
+                          np.sin(theta) * np.sin(phi),
+                          np.cos(theta)])
     init = np.asarray([0.0, 0.0, 1.0])
+
+    # Where k is a vector orthogonal to k and the z-axis
     k = np.cross(init, n_prime)
+    # Where alpha is the angle between k and the z-axis
     alpha = -1 * np.arccos(np.dot(init, n_prime))
 
     for x in range(0, len(structure)):
         v = structure[x][1]
-        structure[x][1] = v * np.cos(alpha) + np.cross(k, v) * np.sin(alpha) + k * (np.dot(k, v)) * (1 - np.cos(alpha))
+        # The Rodrigues' Rotation Formula on each position
+        structure[x][1] = (v * np.cos(alpha) + np.cross(k, v) * np.sin(alpha)
+                          + k * (np.dot(k, v)) * (1 - np.cos(alpha)))
 
     return structure
 
@@ -203,7 +218,7 @@ parser = argparse.ArgumentParser(description='Molecule flattener:')
 parser.add_argument("mol", default="mol.xyz",
                     help="Coordinate file [.xyz]")
 parser.add_argument("-f", "-flip", action='store_true', required=False,
-                    help="Flip molecule through z-axis")
+                    help="Flip molecule about z-axis")
 args = parser.parse_args()
 
 mol = load_xyz(args.mol)
@@ -212,9 +227,14 @@ mol = load_xyz(args.mol)
 mol = translate_structure(mol, -1 * find_centroid(mol))
 save_xyz(mol, "centred.xyz")
 
-res = minimize(rmsd_angle, x0=[0,0], args=mol, method='TNC', bounds=((0, np.pi), (0, 2*np.pi)))
+# Find the spherical angles that define the plane to which the structure's
+#   RMSD is minimized.
+res = minimize(rmsd_angle, x0=[0, 0], args=mol, method='TNC',
+               bounds=((0, 0.5 * np.pi), (0, 2 * np.pi)))
 mol = Rodrigues(res.x, mol)
+# If the user specifies, flip the molecule over the xy-plane
 if args.f:
-    mol = Rodrigues([np.pi, np.pi], mol)
+    mol = Rodrigues([0.5 * np.pi, 0], mol)
+    mol = Rodrigues([0.5 * np.pi, 0], mol)
 
 save_xyz(mol, "flattened.xyz")
