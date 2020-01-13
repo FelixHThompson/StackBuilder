@@ -203,6 +203,11 @@ def Rodrigues(angles, structure):
 
     # Where k is a vector orthogonal to k and the z-axis
     k = np.cross(init, n_prime)
+    k = k / np.linalg.norm(k)
+    print(n_prime)
+    if n_prime[2] == 1.0:
+        print('yo')
+    print(np.linalg.norm(k))
     # Where alpha is the angle between k and the z-axis
     alpha = -1 * np.arccos(np.dot(init, n_prime))
 
@@ -229,8 +234,9 @@ save_xyz(mol, "centred.xyz")
 
 # Find the spherical angles that define the plane to which the structure's
 #   RMSD is minimized.
-res = minimize(rmsd_angle, x0=[0, 0], args=mol, method='TNC',
+res = minimize(rmsd_angle, x0=[0.23 * np.pi, np.pi], args=mol, method='TNC',
                bounds=((0, 0.5 * np.pi), (0, 2 * np.pi)))
+print(res.x)
 mol = Rodrigues(res.x, mol)
 # If the user specifies, flip the molecule over the xy-plane
 if args.f:
