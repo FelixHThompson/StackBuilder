@@ -203,6 +203,7 @@ def Rodrigues(angles, structure):
 
     # Where k is a vector orthogonal to k and the z-axis
     k = np.cross(init, n_prime)
+    k = k / np.linalg.norm(k)
     # Where alpha is the angle between k and the z-axis
     alpha = -1 * np.arccos(np.dot(init, n_prime))
 
@@ -245,7 +246,7 @@ if args.align:
     # Here one could add some selection for only atom-specific mapping
     # Find the spherical angles that define the plane to which the structure's
     #   RMSD is minimized.
-    res = minimize(rmsd_angle, x0=[0, 0], args=monomer, method='TNC',
+    res = minimize(rmsd_angle, x0=[0.23 * np.pi, np.pi], args=monomer, method='TNC',
                    bounds=((0, 0.5 * np.pi), (0, 2 * np.pi)))
     # Rotate the structure according to those angles
     monomer = Rodrigues(res.x, monomer)
