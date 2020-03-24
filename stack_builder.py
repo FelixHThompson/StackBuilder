@@ -292,7 +292,7 @@ if len(rots) > 1:
 if len(slides) > 1:
     if args.s_a:
         for x in range(1, len(slides), 2):
-            slides[x] *= -1
+            slides[x] = 180 - slides[x]
 
 print(rots)
 print(slides)
@@ -322,6 +322,7 @@ for x in range(0, int(args.n) - 1):
     # We add the next translation which has been rotated by the previous
     #   layer-to-layer rotation, keeping the point of reference as the centre
     #   of the previous layer.
+
 
     running_translation += prev_rotation.apply(np.asarray([args.r * math.cos(slides[x] * np.pi / 180), 0.0, args.r * math.sin(slides[x] * np.pi / 180)]))
 
