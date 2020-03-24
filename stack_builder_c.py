@@ -35,13 +35,13 @@ def load_xyz(file_path):
     for lines in file_contents:
     # First two lines of file are descriptive and skipped over
         if i > 1:
-            line_bits = lines.split()
-            if len(line_bits) > 0:
-                coords = np.asarray([float(line_bits[1]), float(line_bits[2]),
-                                    float(line_bits[3])])
+            split_line = lines.split()
+            if len(split_line) > 0:
+                coords = np.asarray([float(split_line[1]), float(split_line[2]),
+                                    float(split_line[3])])
 
-                if len(line_bits) > 2:
-                    structure += [[line_bits[0], coords, i-2]]
+                if len(split_line) > 2:
+                    structure += [[split_line[0], coords, i-2]]
         i += 1
 
     return structure
@@ -216,27 +216,86 @@ def Rodrigues(angles, structure):
 
     return structure
 
-parser = argparse.ArgumentParser(description='Molecule flattener:')
+parser = argparse.ArgumentParser(description='Molecular stack builder:')
 parser.add_argument("mol", default="mol.xyz",
-                    help="Coordinate file [.xyz]")
+                    help="Monomer coordinate file [.xyz formatting]")
+parser.add_argument("-n", "-number", default=3, required=False,
+                    help="Number of layers")
+parser.add_argument("-t", "-twist", default=0, required=False, type=float,
+                    help="Twist angle")
+parser.add_argument("-r", "-separation", default=3.5, required=False,
+                    type=float, help="Vertical layer separation")
+parser.add_argument("-s", "-slide", default=90, required=False,
+                    help="Slide angle")
+parser.add_argument("-o", "-output", default="", required=False,
+                     help="Filename of created stack")
+parser.add_argument("-t_a", action='store_true', required=False,
+                    help="Alternate rotation direction")
+parser.add_argument("-s_a", action='store_true', required=False,
+                    help="Alternate sliding direction")
+parser.add_argument("-align", action='store_true', required=False,
+                    help="Align molecule to xy-plane")
 parser.add_argument("-f", "-flip", action='store_true', required=False,
                     help="Flip molecule about z-axis")
 args = parser.parse_args()
 
-mol = load_xyz(args.mol)
+monomer = load_xyz(args.mol)
 
-## Add some selection for only mapping based on C's for example
-mol = translate_structure(mol, -1 * find_centroid(mol))
-save_xyz(mol, "centred.xyz")
+monomer = translate_structure(monomer, -1 * find_centroid(monomer))
 
-# Find the spherical angles that define the plane to which the structure's
-#   RMSD is minimized.
-res = minimize(rmsd_angle, x0=[0.23 * np.pi, np.pi], args=mol, method='TNC',
-               bounds=((0, 0.5 * np.pi), (0, 2 * np.pi)))
-mol = Rodrigues(res.x, mol)
+if args.align:
+    # Here one could add some selection for only atom-specific mapping
+    # Find the spherical angles that define the plane to which the structure's
+    #   RMSD is minimized.
+    res = minimize(rmsd_angle, x0=[0.23 * np.pi, np.pi], args=monomer, method='TNC',
+                   bounds=((0, 0.5 * np.pi), (0, 2 * np.pi)))
+    # Rotate the structure according to those angles
+    monomer = Rodrigues(res.x, monomer)
+
 # If the user specifies, flip the molecule over the xy-plane
 if args.f:
-    mol = Rodrigues([0.5 * np.pi, 0], mol)
-    mol = Rodrigues([0.5 * np.pi, 0], mol)
+    monomer = Rodrigues([0.5 * np.pi, 0], monomer)
+    monomer = Rodrigues([0.5 * np.pi, 0], monomer)
 
-save_xyz(mol, "flattened.xyz")
+# Deepcopy due to mutability of copy()-ied sublists
+stack = copy.deepcopy(monomer)
+
+# We add the rotations of each step together such that only a single rotation
+#   is needed to be carried out.
+# The translation of each layer is dependent on the rotations of all previous
+#   layers, so we must keep track of it each loop.
+running_rotation = 0.0
+running_translation = np.asarray([0.0, 0.0, 0.0])
+next_rotation = Rotation.from_euler('z', 0, degrees=True)
+
+for x in range(0, int(args.n) - 1):
+    working_layer = copy.deepcopy(monomer)
+    prev_rotation = next_rotation
+
+    if not args.t_a:
+        running_rotation += args.t
+    else:
+        # Flip the rotation direction if twist_alternate is True
+        running_rotation += ((-1) ** x) * args.t
+
+    next_rotation = Rotation.from_euler('z', -running_rotation, degrees=True)
+    working_layer = rotate_structure(working_layer, next_rotation)
+
+    # We add the next translation which has been rotated by the previous
+    #   layer-to-layer rotation, keeping the point of reference as the centre
+    #   of the previous layer.
+    if not args.s_a:
+        running_translation += prev_rotation.apply(np.asarray([float(args.r) * math.cos(float(args.s) * np.pi / 180), 0.0, float(args.r) * math.sin(float(args.s) * np.pi / 180)]))
+    else:
+        # Rotate the translation 180 degrees in the xy-plane if alternating
+        running_translation += prev_rotation.apply(np.asarray([((-1) ** x) * float(args.r) * math.cos(float(args.s) * np.pi / 180), 0.0, float(args.r) * math.sin(float(args.s) * np.pi / 180)]))
+
+    working_layer = translate_structure(working_layer, running_translation)
+    stack += copy.deepcopy(working_layer)
+
+# File name/saving
+if args.o == "":
+    output_name = "stack"
+else:
+    output_name = args.o
+save_xyz(stack, output_name+".xyz")

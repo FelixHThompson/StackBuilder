@@ -203,7 +203,8 @@ def Rodrigues(angles, structure):
 
     # Where k is a vector orthogonal to k and the z-axis
     k = np.cross(init, n_prime)
-    k = k / np.linalg.norm(k)
+    if np.linalg.norm(k) != 0:
+        k = k / np.linalg.norm(k)
     # Where alpha is the angle between k and the z-axis
     alpha = -1 * np.arccos(np.dot(init, n_prime))
 
@@ -218,13 +219,13 @@ def Rodrigues(angles, structure):
 parser = argparse.ArgumentParser(description='Molecular stack builder:')
 parser.add_argument("mol", default="mol.xyz",
                     help="Monomer coordinate file [.xyz formatting]")
-parser.add_argument("-n", "-number", default=3, required=False,
+parser.add_argument("-n", "-number", default=3, required=False, type=int,
                     help="Number of layers")
-parser.add_argument("-t", "-twist", default=0, required=False, type=float,
+parser.add_argument("-t", "-twist", default="0", required=False,
                     help="Twist angle")
 parser.add_argument("-r", "-separation", default=3.5, required=False,
                     type=float, help="Vertical layer separation")
-parser.add_argument("-s", "-slide", default=90, required=False,
+parser.add_argument("-s", "-slide", default="90", required=False,
                     help="Slide angle")
 parser.add_argument("-o", "-output", default="", required=False,
                      help="Filename of created stack")
@@ -256,7 +257,48 @@ if args.f:
     monomer = Rodrigues([0.5 * np.pi, 0], monomer)
     monomer = Rodrigues([0.5 * np.pi, 0], monomer)
 
-# Deepcopy due to mutability of copy-ied sublists
+# Angle input parsing:
+wrong_no_inputs = False
+if len(args.t.split(" ")) > 1:
+    rots = [float(x) for x in args.t.split()]
+    if len(rots) < args.n - 1:
+        padding = [0.0 for x in range(0, args.n - 1 - len(rots))]
+        [rots.append(x) for x in padding]
+        print(" >> Too few twist angles.")
+    if len(rots) > args.n - 1:
+        rots = rots[:args.n - 1]
+        print(" >> Too many twist angles.")
+else:
+    rots = [float(args.t) for x in range(0, args.n - 1)]
+
+if len(args.s.split(" ")) > 1:
+    slides = [float(x) for x in args.s.split()]
+    if len(slides) < args.n - 1:
+        padding = [0.0 for x in range(0, args.n - 1 - len(slides))]
+        [slides.append(x) for x in padding]
+        print(" >> Too few slide angles.")
+    if len(slides) > args.n - 1:
+        slides = slides[:args.n - 1]
+        print(" >> Too many slide angles.")
+else:
+    slides = [float(args.s) for x in range(0, args.n - 1)]
+
+# Applying angle alternation:
+if len(rots) > 1:
+    if args.t_a:
+        for x in range(1, len(rots), 2):
+            rots[x] *= -1
+
+if len(slides) > 1:
+    if args.s_a:
+        for x in range(1, len(slides), 2):
+            slides[x] *= -1
+
+print(rots)
+print(slides)
+
+
+# Deepcopy due to mutability of copy()-ied sublists
 stack = copy.deepcopy(monomer)
 
 # We add the rotations of each step together such that only a single rotation
@@ -271,11 +313,8 @@ for x in range(0, int(args.n) - 1):
     working_layer = copy.deepcopy(monomer)
     prev_rotation = next_rotation
 
-    if not args.t_a:
-        running_rotation += args.t
-    else:
-        # Flip the rotation direction if twist_alternate is True
-        running_rotation += ((-1) ** x) * args.t
+
+    running_rotation += rots[x]
 
     next_rotation = Rotation.from_euler('z', -running_rotation, degrees=True)
     working_layer = rotate_structure(working_layer, next_rotation)
@@ -283,11 +322,8 @@ for x in range(0, int(args.n) - 1):
     # We add the next translation which has been rotated by the previous
     #   layer-to-layer rotation, keeping the point of reference as the centre
     #   of the previous layer.
-    if not args.s_a:
-        running_translation += prev_rotation.apply(np.asarray([float(args.r) * math.cos(float(args.s) * np.pi / 180), 0.0, float(args.r) * math.sin(float(args.s) * np.pi / 180)]))
-    else:
-        # Rotate the translation 180 degrees in the xy-plane if alternating
-        running_translation += prev_rotation.apply(np.asarray([((-1) ** x) * float(args.r) * math.cos(float(args.s) * np.pi / 180), 0.0, float(args.r) * math.sin(float(args.s) * np.pi / 180)]))
+
+    running_translation += prev_rotation.apply(np.asarray([args.r * math.cos(slides[x] * np.pi / 180), 0.0, args.r * math.sin(slides[x] * np.pi / 180)]))
 
     working_layer = translate_structure(working_layer, running_translation)
     stack += copy.deepcopy(working_layer)
